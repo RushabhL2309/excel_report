@@ -61,10 +61,13 @@ const normalizeKey = (value: string | number | Date | null): string => {
   return raw.replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
-const extractNumber = (value: string | number | null): number | null => {
+const extractNumber = (value: string | number | Date | null): number | null => {
   if (value === null || value === undefined || value === '') return null
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : null
+  }
+  if (value instanceof Date) {
+    return null
   }
   const cleaned = value.replace(/,/g, '')
   const match = cleaned.match(/-?\d+(?:\.\d+)?/)
