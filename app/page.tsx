@@ -23,23 +23,35 @@ type SalespersonMetric = {
   breakdown: BreakdownEntry[]
 }
 
+type InternalBreakdown = {
+  name: string
+  breakdown: BreakdownEntry[]
+}
+
 type CustomerVisitInfo = {
   customerId: string
-  totalDepartments: number | null
-  visitedDepartments: string[]
+  departments: Set<string>
   dateIso: string | null
   dateKey: string
 }
 
-type InternalBreakdown = {
-  name: string
-  breakdown: BreakdownEntry[]
+type CustomerInteraction = {
+  customerId: string
+  normalizedCustomerId: string
+  voucherNo: string | null
+  voucherDateIso: string | null
+  voucherDateDisplay: string | null
+  department: string | null
+  counter: string | null
+  departmentLabel: string | null
+  salesperson: string
 }
 
 type ParsedWorkbook = {
   metrics: SalespersonMetric[]
   availableDates: string[]
   dateLabels: Record<string, string>
+  customerInteractions: CustomerInteraction[]
 }
 
 const normalizeQuotes = (value: string) => value.replace(/[’‘]/g, "'")
@@ -59,21 +71,6 @@ const stringifyCell = (value: string | number | Date | null): string => {
 const normalizeKey = (value: string | number | Date | null): string => {
   const raw = normalizeQuotes(stringifyCell(value))
   return raw.replace(/\s+/g, ' ').trim().toLowerCase()
-}
-
-const extractNumber = (value: string | number | Date | null): number | null => {
-  if (value === null || value === undefined || value === '') return null
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null
-  }
-  if (value instanceof Date) {
-    return null
-  }
-  const cleaned = value.replace(/,/g, '')
-  const match = cleaned.match(/-?\d+(?:\.\d+)?/)
-  if (!match) return null
-  const num = Number(match[0])
-  return Number.isFinite(num) ? num : null
 }
 
 const formatDisplayDate = (iso: string): string => {
@@ -138,6 +135,14 @@ const addDaysToIso = (iso: string, days: number): string => {
   return toIsoDate(date)
 }
 
+const calculateIncentiveForDepartments = (departmentCount: number): number => {
+  if (departmentCount >= 5) return 80
+  if (departmentCount === 4) return 60
+  if (departmentCount === 3) return 40
+  if (departmentCount === 2) return 20
+  return 0
+}
+
 const parseWorkbook = (buffer: ArrayBuffer): ParsedWorkbook => {
   const workbook = XLSX.read(buffer, { type: 'array' })
   if (workbook.SheetNames.length === 0) {
@@ -159,7 +164,9 @@ const parseWorkbook = (buffer: ArrayBuffer): ParsedWorkbook => {
     throw new Error('The worksheet is empty.')
   }
 
-  const headerRowIndex = rows.findIndex((row) => row.some((value) => stringifyCell(value) !== ''))
+  const HEADER_ROW_NUMBER = 4
+  const headerRowIndex =
+    HEADER_ROW_NUMBER - 1 < rows.length ? HEADER_ROW_NUMBER - 1 : rows.findIndex((row) => row.some((value) => stringifyCell(value) !== ''))
   if (headerRowIndex === -1) {
     throw new Error('Unable to locate a header row in the worksheet.')
   }
@@ -168,43 +175,54 @@ const parseWorkbook = (buffer: ArrayBuffer): ParsedWorkbook => {
   const normalizedHeader = headerRow.map((cell) => normalizeQuotes(stringifyCell(cell)).trim())
   const headerLookup = normalizedHeader.map((label) => label.toLowerCase())
 
-  const voucherDateIndex = headerLookup.findIndex((label) => label.includes('date'))
-  const firstSalesmanIndex = headerLookup.indexOf('salesman name')
-  const itemGroupIndex = headerLookup.indexOf('itemgroup name')
-  const firstMobileIndex = headerLookup.indexOf('mobile1')
-  const secondMobileIndex = headerLookup.indexOf('mobile1', firstMobileIndex + 1)
-  const totalIndex = headerLookup.indexOf('total')
-  const table3SalesmanIndex = headerLookup.indexOf('salesman name', firstSalesmanIndex + 1)
+  const findHeaderIndex = (needles: string | string[], fromIndex = 0) => {
+    const targets = Array.isArray(needles) ? needles : [needles]
+    const loweredTargets = targets.map((item) => item.toLowerCase())
+    for (let index = fromIndex; index < headerLookup.length; index += 1) {
+      const headerLabel = headerLookup[index]
+      if (!headerLabel) continue
+      if (
+        loweredTargets.some(
+          (target) =>
+            headerLabel === target ||
+            headerLabel.includes(target) ||
+            normalizedHeader[index].toLowerCase() === target
+        )
+      ) {
+        return index
+      }
+    }
+    return -1
+  }
+
+  const voucherNoIndex = findHeaderIndex(['voucher no'])
+  const voucherDateIndex = findHeaderIndex(['voucher date', 'date'])
+  const firstSalesmanIndex = findHeaderIndex(['salesman name', 'sales person'])
+  const itemGroupIndex = findHeaderIndex(['itemgroup name', 'item group name', 'item group'])
+  const counterIndex = findHeaderIndex(['counter name', 'counter'])
+  const firstMobileIndex = findHeaderIndex(['mobile1', 'customer id', 'customer mobile'])
 
   if (firstSalesmanIndex === -1 || itemGroupIndex === -1 || firstMobileIndex === -1) {
     throw new Error('Failed to detect the salesman/department table. Please ensure headers like "Salesman Name", "ItemGroup Name", and "Mobile1" exist.')
   }
 
-  if (secondMobileIndex === -1 || totalIndex === -1) {
-    throw new Error('Failed to detect the department visit table. Please ensure headers like "Mobile1" and "total" exist for the second table.')
-  }
-
-  if (table3SalesmanIndex === -1) {
-    throw new Error('Failed to detect the incentive table. Please ensure the header row contains a second "Salesman Name" column followed by salesperson names.')
-  }
-
-  const departmentColumnIndexes = headerLookup
-    .map((label, index) => ({ label, index }))
-    .filter(({ index }) => index > secondMobileIndex && index < totalIndex && headerRow[index] !== null)
-    .filter(({ label }) => label && label !== 'mobile1' && label !== 'total')
-
-  const incentiveColumns = headerLookup
-    .map((label, index) => ({ label, index, raw: headerRow[index] }))
-    .filter(({ index }) => index > table3SalesmanIndex)
-    .map(({ index, raw }) => ({ index, name: stringifyCell(raw) }))
-    .filter(({ name }) => name !== '')
-
   const salesmanDepartments = new Map<string, { name: string; departments: Set<string> }>()
-  const interactionMap = new Map<string, Set<string>>()
   const customerVisits = new Map<string, CustomerVisitInfo>()
+  const customerSalesmen = new Map<
+    string,
+    Map<string, { name: string; departments: Set<string> }>
+  >()
   const breakdownMap = new Map<string, InternalBreakdown>()
   const availableDates = new Set<string>()
   const dateLabels = new Map<string, string>()
+  const customerInteractions: CustomerInteraction[] = []
+
+  const formatDepartmentCounter = (department: string, counter: string) => {
+    if (department && counter) return `${department} (${counter})`
+    if (department) return department
+    if (counter) return counter
+    return ''
+  }
 
   for (let rowIndex = headerRowIndex + 1; rowIndex < rows.length; rowIndex += 1) {
     const row = rows[rowIndex]
@@ -223,10 +241,13 @@ const parseWorkbook = (buffer: ArrayBuffer): ParsedWorkbook => {
     // Table 1: Salesman -> Department mapping and per-customer interactions
     const rawSalesman = stringifyCell(row[firstSalesmanIndex])
     const rawDepartment = stringifyCell(row[itemGroupIndex])
+    const rawCounter = counterIndex !== -1 ? stringifyCell(row[counterIndex]) : ''
     const rawCustomerFromTable1 = stringifyCell(row[firstMobileIndex])
+    const voucherNo = voucherNoIndex !== -1 ? stringifyCell(row[voucherNoIndex]) : ''
 
     const salesmanKey = normalizeKey(rawSalesman)
-    const departmentValue = rawDepartment
+    const customerKey = normalizeKey(rawCustomerFromTable1)
+    const departmentLabel = formatDepartmentCounter(rawDepartment, rawCounter)
 
     if (salesmanKey) {
       if (!salesmanDepartments.has(salesmanKey)) {
@@ -235,99 +256,105 @@ const parseWorkbook = (buffer: ArrayBuffer): ParsedWorkbook => {
           departments: new Set(),
         })
       }
-      if (departmentValue) {
-        salesmanDepartments.get(salesmanKey)!.departments.add(departmentValue)
+      if (departmentLabel) {
+        salesmanDepartments.get(salesmanKey)!.departments.add(departmentLabel)
       }
     }
 
-    if (salesmanKey && rawCustomerFromTable1) {
-      const customerKey = normalizeKey(rawCustomerFromTable1)
-      const interactionKey = `${customerKey}__${salesmanKey}__${dateInfo.key}`
-      if (!interactionMap.has(interactionKey)) {
-        interactionMap.set(interactionKey, new Set())
-      }
-      if (departmentValue) {
-        interactionMap.get(interactionKey)!.add(departmentValue)
-      }
-    }
-
-    // Table 2: Customer visits per department (date aware)
-    const rawCustomerFromTable2 = stringifyCell(row[secondMobileIndex])
-    if (rawCustomerFromTable2) {
-      const customerKey = normalizeKey(rawCustomerFromTable2)
+    if (salesmanKey && customerKey) {
       const visitKey = `${customerKey}__${dateInfo.key}`
-      const visitedDepartments = departmentColumnIndexes
-        .map(({ index }) => {
-          const value = extractNumber(row[index])
-          if (value && value > 0) {
-            return stringifyCell(headerRow[index]) || 'Unknown Department'
-          }
-          return null
-        })
-        .filter((value): value is string => Boolean(value))
-
-      const totalDepartments = extractNumber(row[totalIndex]) ?? (visitedDepartments.length || null)
-      customerVisits.set(visitKey, {
-        customerId: rawCustomerFromTable2,
-        totalDepartments,
-        visitedDepartments,
-        dateIso: dateInfo.iso,
-        dateKey: dateInfo.key,
-      })
-    }
-
-    // Table 3: Incentive distribution per salesperson
-    const rawCustomerFromTable3 = stringifyCell(row[table3SalesmanIndex])
-    if (rawCustomerFromTable3) {
-      const customerKey = normalizeKey(rawCustomerFromTable3)
-      const visitKey = `${customerKey}__${dateInfo.key}`
-      const visitInfo = customerVisits.get(visitKey)
-
-      incentiveColumns.forEach(({ index, name }) => {
-        const amount = extractNumber(row[index])
-        if (!amount || amount === 0) {
-          return
-        }
-
-        const salespersonKey = normalizeKey(name)
-        if (!salespersonKey) {
-          return
-        }
-
-        if (!visitInfo) {
-          return
-        }
-
-        const totalDepartments = visitInfo.totalDepartments ?? visitInfo.visitedDepartments.length
-        if (totalDepartments !== null && totalDepartments <= 1) {
-          return
-        }
-
-        if (!breakdownMap.has(salespersonKey)) {
-          breakdownMap.set(salespersonKey, {
-            name,
-            breakdown: [],
+      if (!customerSalesmen.has(visitKey)) {
+        customerSalesmen.set(visitKey, new Map())
+      }
+      if (!customerSalesmen.get(visitKey)!.has(salesmanKey)) {
+        customerSalesmen
+          .get(visitKey)!
+          .set(salesmanKey, {
+            name: rawSalesman || 'Unknown Salesman',
+            departments: new Set<string>(),
           })
-        }
+      }
+      if (departmentLabel) {
+        customerSalesmen.get(visitKey)!.get(salesmanKey)!.departments.add(departmentLabel)
+      }
+    }
 
-        const handledKey = `${customerKey}__${salespersonKey}__${dateInfo.key}`
-        const handledDepartments = interactionMap.get(handledKey)
-
-        breakdownMap.get(salespersonKey)!.breakdown.push({
-          customerId: visitInfo.customerId,
-          amount,
-          departmentsVisited: totalDepartments,
-          visitedDepartments: visitInfo.visitedDepartments,
-          handledDepartments: handledDepartments ? Array.from(handledDepartments) : [],
+    if (customerKey) {
+      const visitKey = `${customerKey}__${dateInfo.key}`
+      if (!customerVisits.has(visitKey)) {
+        customerVisits.set(visitKey, {
+          customerId: rawCustomerFromTable1,
+          departments: new Set<string>(),
+          dateIso: dateInfo.iso,
           dateKey: dateInfo.key,
-          dateIso: visitInfo.dateIso,
-          displayDate: visitInfo.dateIso
-            ? dateLabels.get(visitInfo.dateIso) ?? formatDisplayDate(visitInfo.dateIso)
-            : dateInfo.display,
         })
+      }
+      if (departmentLabel) {
+        customerVisits.get(visitKey)!.departments.add(departmentLabel)
+      }
+    }
+
+    if (rawCustomerFromTable1) {
+      customerInteractions.push({
+        customerId: rawCustomerFromTable1,
+        normalizedCustomerId: customerKey,
+        voucherNo: voucherNo || null,
+        voucherDateIso: dateInfo.iso,
+        voucherDateDisplay: dateInfo.iso
+          ? dateLabels.get(dateInfo.iso) ?? formatDisplayDate(dateInfo.iso)
+          : dateInfo.display,
+        department: rawDepartment || null,
+        counter: rawCounter || null,
+        departmentLabel: departmentLabel || null,
+        salesperson: rawSalesman || 'Unknown Salesman',
       })
     }
+
+    // Incentive table rows are no longer required; incentives will be calculated after parsing
   }
+
+  customerVisits.forEach((visitInfo, visitKey) => {
+    const salesmenForVisit = customerSalesmen.get(visitKey)
+    if (!salesmenForVisit || salesmenForVisit.size === 0) {
+      return
+    }
+
+    const uniqueVisitedDepartments = new Set(visitInfo.departments)
+    salesmenForVisit.forEach(({ departments }) => {
+      departments.forEach((dept) => uniqueVisitedDepartments.add(dept))
+    })
+
+    const departmentsVisitedCount = uniqueVisitedDepartments.size
+
+    const incentiveAmount = calculateIncentiveForDepartments(departmentsVisitedCount)
+    if (incentiveAmount === 0) {
+      return
+    }
+
+    const displayDate = visitInfo.dateIso
+      ? dateLabels.get(visitInfo.dateIso) ?? formatDisplayDate(visitInfo.dateIso)
+      : null
+
+    salesmenForVisit.forEach(({ name, departments }, salesmanKey) => {
+      if (!breakdownMap.has(salesmanKey)) {
+        breakdownMap.set(salesmanKey, {
+          name,
+          breakdown: [],
+        })
+      }
+
+      breakdownMap.get(salesmanKey)!.breakdown.push({
+        customerId: visitInfo.customerId,
+        amount: incentiveAmount,
+        departmentsVisited: departmentsVisitedCount,
+        visitedDepartments: Array.from(uniqueVisitedDepartments),
+        handledDepartments: Array.from(departments),
+        dateKey: visitInfo.dateKey,
+        dateIso: visitInfo.dateIso,
+        displayDate,
+      })
+    })
+  })
 
   const metrics: SalespersonMetric[] = []
 
@@ -373,6 +400,7 @@ const parseWorkbook = (buffer: ArrayBuffer): ParsedWorkbook => {
     metrics: sortedMetrics,
     availableDates: availableDatesList,
     dateLabels: dateLabelRecord,
+    customerInteractions,
   }
 }
 
@@ -390,6 +418,7 @@ export default function Dashboard() {
   const [rawMetrics, setRawMetrics] = useState<SalespersonMetric[]>([])
   const [availableDates, setAvailableDates] = useState<string[]>([])
   const [dateLabels, setDateLabels] = useState<Record<string, string>>({})
+  const [customerInteractions, setCustomerInteractions] = useState<CustomerInteraction[]>([])
   const [selectedSalespersonName, setSelectedSalespersonName] = useState<string | null>(null)
   const [timeframe, setTimeframe] = useState<Timeframe>('all')
   const [selectedDay, setSelectedDay] = useState('')
@@ -408,6 +437,20 @@ export default function Dashboard() {
       setWeekStart('')
     }
   }, [availableDates])
+
+  const interactionsByCustomer = useMemo(() => {
+    const map = new Map<string, CustomerInteraction[]>()
+    customerInteractions.forEach((entry) => {
+      const key = entry.normalizedCustomerId || entry.customerId
+      if (!map.has(key)) {
+        map.set(key, [])
+      }
+      map.get(key)!.push(entry)
+    })
+    return map
+  }, [customerInteractions])
+
+  const customersWithInteractions = interactionsByCustomer.size
 
   const filterPredicate = useMemo(() => {
     if (timeframe === 'all') {
@@ -489,6 +532,7 @@ export default function Dashboard() {
       setRawMetrics(parsed.metrics)
       setAvailableDates(parsed.availableDates)
       setDateLabels(parsed.dateLabels)
+      setCustomerInteractions(parsed.customerInteractions)
       setTimeframe('all')
       setSelectedDay(parsed.availableDates[parsed.availableDates.length - 1] ?? '')
       setWeekStart(parsed.availableDates[parsed.availableDates.length - 1] ?? '')
@@ -497,6 +541,7 @@ export default function Dashboard() {
       setRawMetrics([])
       setAvailableDates([])
       setDateLabels({})
+      setCustomerInteractions([])
       setError(err instanceof Error ? err.message : 'Failed to parse Excel file.')
     } finally {
       setIsParsing(false)
@@ -691,7 +736,9 @@ export default function Dashboard() {
                 )}
               </div>
             </div>
-            <div className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">Current view: {timeframeLabel}</div>
+            <div className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+              Current view: {timeframeLabel} · Parsed customers: {customersWithInteractions}
+            </div>
           </div>
         </div>
 
