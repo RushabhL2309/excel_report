@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 
 const UNKNOWN_DATE_KEY = '__unknown__'
@@ -412,6 +412,10 @@ type ComputedMetric = SalespersonMetric & {
   customersCount: number
 }
 
+type DetailViewMode = 'departments' | 'incentives'
+
+type ExpandedGroupState = Record<string, boolean>
+
 const toTimestamp = (iso: string) => new Date(`${iso}T00:00:00Z`).getTime()
 
 export default function Dashboard() {
@@ -420,6 +424,8 @@ export default function Dashboard() {
   const [dateLabels, setDateLabels] = useState<Record<string, string>>({})
   const [customerInteractions, setCustomerInteractions] = useState<CustomerInteraction[]>([])
   const [selectedSalespersonName, setSelectedSalespersonName] = useState<string | null>(null)
+  const [detailViewMode, setDetailViewMode] = useState<DetailViewMode>('incentives')
+  const [expandedGroups, setExpandedGroups] = useState<ExpandedGroupState>({})
   const [timeframe, setTimeframe] = useState<Timeframe>('all')
   const [selectedDay, setSelectedDay] = useState('')
   const [weekStart, setWeekStart] = useState('')
@@ -763,9 +769,6 @@ export default function Dashboard() {
                     Salesperson
                   </th>
                   <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                    Departments
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                     Customers
                   </th>
                   <th scope="col" className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
@@ -777,25 +780,157 @@ export default function Dashboard() {
                 {computedMetrics.map((metric) => {
                   const isSelected = selectedSalespersonName === metric.name
                   return (
-                    <tr
-                      key={metric.name}
-                      onClick={() => setSelectedSalespersonName(isSelected ? null : metric.name)}
-                      className={`cursor-pointer transition hover:bg-blue-50 dark:hover:bg-gray-700 ${
-                        isSelected ? 'bg-blue-50/80 dark:bg-gray-700/80' : ''
-                      }`}
-                    >
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{metric.name}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">
-                        {metric.departments.length > 0 ? metric.departments.join(', ') : 'Not available'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{metric.customersCount}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-right text-gray-900 dark:text-white">₹{metric.filteredTotal.toLocaleString()}</td>
-                    </tr>
+                <Fragment key={metric.name}>
+                      <tr
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedSalespersonName(null)
+                            setExpandedGroups({})
+                          } else {
+                            setSelectedSalespersonName(metric.name)
+                            setDetailViewMode('incentives')
+                            setExpandedGroups({})
+                          }
+                        }}
+                        className={`cursor-pointer transition hover:bg-blue-50 dark:hover:bg-gray-700 ${
+                          isSelected ? 'bg-blue-50/80 dark:bg-gray-700/80' : ''
+                        }`}
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">{metric.name}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-300">{metric.customersCount}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-right text-gray-900 dark:text-white">₹{metric.filteredTotal.toLocaleString()}</td>
+                      </tr>
+                      {isSelected && (
+                        <tr>
+                          <td colSpan={3} className="px-6 pb-6">
+                            <div className="mt-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40">
+                              <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <p className="text-sm font-semibold text-gray-900 dark:text-white">{metric.name}</p>
+                                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                                    {metric.filteredBreakdown.length} incentive entries across {metric.customersCount} customers.
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => setDetailViewMode('departments')}
+                                    className={`rounded-md px-3 py-2 text-xs font-medium ${
+                                      detailViewMode === 'departments'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600'
+                                    }`}
+                                  >
+                                    Departments
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDetailViewMode('incentives')}
+                                    className={`rounded-md px-3 py-2 text-xs font-medium ${
+                                      detailViewMode === 'incentives'
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600'
+                                    }`}
+                                  >
+                                    Detailed Info
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="border-t border-gray-200 dark:border-gray-700 px-4 py-4">
+                                {detailViewMode === 'departments' ? (
+                                  metric.departments.length === 0 ? (
+                                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                                      No department information recorded for this salesperson.
+                                    </p>
+                                  ) : (
+                                    <div className="flex flex-wrap gap-2">
+                                      {metric.departments.map((department) => (
+                                        <span
+                                          key={department}
+                                          className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-900/40 px-3 py-1 text-xs font-medium text-blue-800 dark:text-blue-200"
+                                        >
+                                          {department}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )
+                                ) : groupedBreakdown.length === 0 ? (
+                                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                                    No incentive entries recorded for this salesperson in the selected timeline.
+                                  </p>
+                                ) : (
+                                  <div className="space-y-4">
+                                    {groupedBreakdown.map((group) => (
+                                      <div key={group.key} className="rounded-md border border-gray-200 dark:border-gray-700">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setExpandedGroups((current) => ({
+                                              ...current,
+                                              [group.key]: !current[group.key],
+                                            }))
+                                          }
+                                          className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between bg-white dark:bg-gray-800 px-4 py-3"
+                                        >
+                                          <div className="text-left">
+                                            <p className="text-sm font-semibold text-gray-900 dark:text-white">{group.label}</p>
+                                            <p className="text-xs text-gray-600 dark:text-gray-400">{group.entries.length} entries</p>
+                                          </div>
+                                          <div className="flex items-center gap-3">
+                                            <p className="text-base font-semibold text-gray-900 dark:text-white">₹{group.total.toLocaleString()}</p>
+                                            <span className="text-xs font-medium text-blue-600 dark:text-blue-300">
+                                              {expandedGroups[group.key] ? 'Hide details' : 'Show details'}
+                                            </span>
+                                          </div>
+                                        </button>
+                                        {expandedGroups[group.key] && (
+                                          <ul className="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-900/40">
+                                            {group.entries.map((entry, index) => (
+                                              <li key={`${entry.customerId}-${index}`} className="px-4 py-3">
+                                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                                  <div>
+                                                    <p className="text-sm font-semibold text-gray-900 dark:text-white">Customer: {entry.customerId}</p>
+                                                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                                                      Departments visited: {entry.departmentsVisited ?? 'Unknown'}
+                                                    </p>
+                                                  </div>
+                                                  <p className="text-sm font-semibold text-gray-900 dark:text-white">₹{entry.amount.toLocaleString()}</p>
+                                                </div>
+                                                {(entry.visitedDepartments.length > 0 || entry.handledDepartments.length > 0) && (
+                                                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-gray-600 dark:text-gray-300">
+                                                    {entry.visitedDepartments.length > 0 && (
+                                                      <div>
+                                                        <p className="font-semibold text-gray-700 dark:text-gray-200">Visited Departments</p>
+                                                        <p>{entry.visitedDepartments.join(', ')}</p>
+                                                      </div>
+                                                    )}
+                                                    {entry.handledDepartments.length > 0 && (
+                                                      <div>
+                                                        <p className="font-semibold text-gray-700 dark:text-gray-200">Handled by {metric.name}</p>
+                                                        <p>{entry.handledDepartments.join(', ')}</p>
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                )}
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   )
                 })}
                 {computedMetrics.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-6 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+                    <td colSpan={3} className="px-6 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
                       No salespeople to display for the selected timeline.
                     </td>
                   </tr>
@@ -804,76 +939,6 @@ export default function Dashboard() {
             </table>
           </div>
         </div>
-
-        {selectedSalesperson && (
-          <div className="mt-8 bg-white dark:bg-gray-800 rounded-lg shadow border border-gray-200 dark:border-gray-700">
-            <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-                  Incentive Breakdown – {selectedSalesperson.name}
-                </h2>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Total incentive ₹{selectedSalesperson.filteredTotal.toLocaleString()} across {selectedSalesperson.filteredBreakdown.length} entries.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedSalespersonName(null)}
-                className="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
-              >
-                Clear selection
-              </button>
-            </div>
-            <div className="p-6 space-y-6">
-              {groupedBreakdown.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">No incentive entries recorded for this salesperson in the selected timeline.</p>
-              ) : (
-                groupedBreakdown.map((group) => (
-                  <div key={group.key} className="border border-gray-200 dark:border-gray-700 rounded-md">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between bg-gray-50 dark:bg-gray-900/40 px-4 py-3">
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{group.label}</p>
-                        <p className="text-xs text-gray-600 dark:text-gray-400">{group.entries.length} entries</p>
-                      </div>
-                      <p className="text-lg font-bold text-gray-900 dark:text-white">₹{group.total.toLocaleString()}</p>
-                    </div>
-                    <ul className="divide-y divide-gray-200 dark:divide-gray-700">
-                      {group.entries.map((entry, index) => (
-                        <li key={`${entry.customerId}-${index}`} className="px-4 py-3">
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                              <p className="text-sm font-semibold text-gray-900 dark:text-white">Customer: {entry.customerId}</p>
-                              <p className="text-xs text-gray-600 dark:text-gray-400">
-                                Departments visited: {entry.departmentsVisited ?? 'Unknown'}
-                              </p>
-                            </div>
-                            <p className="text-base font-semibold text-gray-900 dark:text-white">₹{entry.amount.toLocaleString()}</p>
-                          </div>
-                          {(entry.visitedDepartments.length > 0 || entry.handledDepartments.length > 0) && (
-                            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-gray-600 dark:text-gray-300">
-                              {entry.visitedDepartments.length > 0 && (
-                                <div>
-                                  <p className="font-semibold text-gray-700 dark:text-gray-200">Visited Departments</p>
-                                  <p>{entry.visitedDepartments.join(', ')}</p>
-                                </div>
-                              )}
-                              {entry.handledDepartments.length > 0 && (
-                                <div>
-                                  <p className="font-semibold text-gray-700 dark:text-gray-200">Handled by {selectedSalesperson.name}</p>
-                                  <p>{entry.handledDepartments.join(', ')}</p>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
       </main>
     </div>
   )
