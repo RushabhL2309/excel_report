@@ -4,14 +4,23 @@ import { prisma } from '@/lib/prisma'
 export async function GET(request: NextRequest) {
   try {
     // Get all salespeople metrics (visits)
+    // Note: MongoDB doesn't support nested orderBy in Prisma, so we'll sort in memory
     const visits = await prisma.customerVisit.findMany({
       include: {
         customer: true,
-        transactions: {
-          orderBy: { voucherDate: 'asc' },
-        },
+        transactions: true, // Get all transactions without ordering
       },
+      // MongoDB can handle top-level orderBy
       orderBy: { visitDate: 'desc' },
+    })
+
+    // Sort transactions in memory (MongoDB limitation)
+    visits.forEach(visit => {
+      if (visit.transactions && visit.transactions.length > 0) {
+        visit.transactions.sort((a, b) => {
+          return a.voucherDate.getTime() - b.voucherDate.getTime()
+        })
+      }
     })
 
     // If no visits, return empty data
