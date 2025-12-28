@@ -98,9 +98,10 @@ export async function POST(request: NextRequest) {
         ? new Date(interaction.voucherDateIso + 'T00:00:00Z')
         : new Date()
       
-      const voucherNo = interaction.voucherNo ? String(interaction.voucherNo).trim() : null
-      // Create unique visit key: customerId_date_voucherNo
-      const visitKey = `${normalizedId}_${interaction.voucherDateIso || 'NODATE'}_${voucherNo ? voucherNo.replace(/\s+/g, '') : 'NOVOUCHER'}`
+      // Create unique visit key: customerId_date (one visit per customer per day)
+      // Format date as YYYY-MM-DD to ensure consistent grouping
+      const dateKey = interaction.voucherDateIso || visitDate.toISOString().split('T')[0]
+      const visitKey = `${normalizedId}_${dateKey}`
 
       const customerDbId = customerMap.get(normalizedId)
       if (!customerDbId) {
@@ -156,42 +157,58 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Check if visit already exists
+        // Check if visit already exists (by visitKey)
         const existingVisit = await prisma.customerVisit.findUnique({
           where: { visitKey },
+          include: {
+            transactions: true, // Get existing transactions to delete them
+          },
         })
 
-        const customerVisit = existingVisit
-          ? await prisma.customerVisit.update({
-              where: { visitKey },
-              data: {
-                visitDate: visitData.visitDate,
-                departmentsVisited,
-                departmentsNotVisited,
-                departmentsCount: departmentsVisited.length,
-                totalDepartmentsAvailable: MASTER_DEPARTMENTS.length,
-                incentiveAmount,
-                salespersons: Array.from(visitData.salespersons),
-              },
-            })
-          : await prisma.customerVisit.create({
-              data: {
-                customerId: visitData.customerId,
-                visitDate: visitData.visitDate,
-                voucherNo: visitData.voucherNo,
-                visitKey,
-                departmentsVisited,
-                departmentsNotVisited,
-                departmentsCount: departmentsVisited.length,
-                totalDepartmentsAvailable: MASTER_DEPARTMENTS.length,
-                incentiveAmount,
-                salespersons: Array.from(visitData.salespersons),
-              },
-            })
+        let customerVisit
+        const isNewVisit = !existingVisit
+
+        if (existingVisit) {
+          // Update existing visit - delete old transactions and create new ones
+          // First, delete all existing transactions for this visit
+          await prisma.visitTransaction.deleteMany({
+            where: { visitId: existingVisit.id },
+          })
+
+          // Update the visit with new data
+          customerVisit = await prisma.customerVisit.update({
+            where: { visitKey },
+            data: {
+              visitDate: visitData.visitDate,
+              departmentsVisited,
+              departmentsNotVisited,
+              departmentsCount: departmentsVisited.length,
+              totalDepartmentsAvailable: MASTER_DEPARTMENTS.length,
+              incentiveAmount,
+              salespersons: Array.from(visitData.salespersons),
+            },
+          })
+        } else {
+          // Create new visit
+          customerVisit = await prisma.customerVisit.create({
+            data: {
+              customerId: visitData.customerId,
+              visitDate: visitData.visitDate,
+              voucherNo: null, // No single voucher since multiple transactions per day
+              visitKey,
+              departmentsVisited,
+              departmentsNotVisited,
+              departmentsCount: departmentsVisited.length,
+              totalDepartmentsAvailable: MASTER_DEPARTMENTS.length,
+              incentiveAmount,
+              salespersons: Array.from(visitData.salespersons),
+            },
+          })
+        }
 
         savedVisits++
 
-        // Save transactions
+        // Save/update transactions for this visit
         for (const transaction of visitData.transactions) {
           try {
             await prisma.visitTransaction.create({
@@ -201,7 +218,7 @@ export async function POST(request: NextRequest) {
                 voucherNo: transaction.voucherNo || 'NOVOUCHER',
                 voucherDate: transaction.voucherDateIso 
                   ? new Date(transaction.voucherDateIso + 'T00:00:00Z')
-                  : new Date(),
+                  : visitData.visitDate,
                 department: transaction.department || '',
                 counter: transaction.counter || null,
                 departmentLabel: transaction.departmentLabel || '',
