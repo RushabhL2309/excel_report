@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     })
 
     // Get feedback to determine success
-    const customerIds = [...new Set(attempts.map(a => a.customerId))]
+    const customerIds = Array.from(new Set(attempts.map(a => a.customerId)))
     const feedbacks = await prisma.callFeedback.findMany({
       where: {
         customerId: { in: customerIds },
