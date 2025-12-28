@@ -3,18 +3,7 @@ import { prisma } from '@/lib/prisma'
 
 export async function GET(request: NextRequest) {
   try {
-    // Get all customers with their visits
-    const customers = await prisma.customer.findMany({
-      include: {
-        visits: {
-          orderBy: { visitDate: 'desc' },
-          take: 1, // Get latest visit for each customer
-        },
-      },
-      orderBy: { lastVisitDate: 'desc' },
-    })
-
-    // Get all salespeople metrics
+    // Get all salespeople metrics (visits)
     const visits = await prisma.customerVisit.findMany({
       include: {
         customer: true,
@@ -24,6 +13,16 @@ export async function GET(request: NextRequest) {
       },
       orderBy: { visitDate: 'desc' },
     })
+
+    // If no visits, return empty data
+    if (visits.length === 0) {
+      return NextResponse.json({
+        metrics: [],
+        availableDates: [],
+        dateLabels: {},
+        customerInteractions: [],
+      })
+    }
 
     // Build salesperson metrics
     const salespersonMap = new Map<string, {
@@ -119,8 +118,14 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error('Error loading dashboard data:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const errorStack = error instanceof Error ? error.stack : undefined
+    console.error('Error details:', { errorMessage, errorStack })
     return NextResponse.json(
-      { error: 'Failed to load dashboard data' },
+      { 
+        error: 'Failed to load dashboard data',
+        details: process.env.NODE_ENV === 'development' ? errorMessage : undefined
+      },
       { status: 500 }
     )
   }
