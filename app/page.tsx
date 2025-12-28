@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
+import Sidebar from '@/components/Sidebar'
 
 const UNKNOWN_DATE_KEY = '__unknown__'
 
@@ -217,12 +218,21 @@ const parseWorkbook = (buffer: ArrayBuffer): ParsedWorkbook => {
   const dateLabels = new Map<string, string>()
   const customerInteractions: CustomerInteraction[] = []
 
-  const formatDepartmentCounter = (department: string, counter: string) => {
-    if (department && counter) return `${department} (${counter})`
-    if (department) return department
-    if (counter) return counter
-    return ''
+const normalizeDepartment = (department: string): string => {
+  const normalized = department.toLowerCase().trim()
+  if (normalized === 'mens accessories' || normalized === 'men\'s accessories') {
+    return 'MENS ETHNICS'
   }
+  return department
+}
+
+const formatDepartmentCounter = (department: string, counter: string) => {
+  const normalizedDepartment = normalizeDepartment(department)
+  if (normalizedDepartment && counter) return `${normalizedDepartment} (${counter})`
+  if (normalizedDepartment) return normalizedDepartment
+  if (counter) return counter
+  return ''
+}
 
   for (let rowIndex = headerRowIndex + 1; rowIndex < rows.length; rowIndex += 1) {
     const row = rows[rowIndex]
@@ -430,8 +440,41 @@ export default function Dashboard() {
   const [selectedDay, setSelectedDay] = useState('')
   const [weekStart, setWeekStart] = useState('')
   const [isParsing, setIsParsing] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [fileName, setFileName] = useState<string | null>(null)
+
+  // Load data from database on mount
+  useEffect(() => {
+    loadDashboardData()
+  }, [])
+
+  // Load dashboard data from database
+  const loadDashboardData = async () => {
+    setIsLoading(true)
+    try {
+      const response = await fetch('/api/dashboard/data')
+      if (response.ok) {
+        const data = await response.json()
+        setRawMetrics(data.metrics || [])
+        setAvailableDates(data.availableDates || [])
+        setDateLabels(data.dateLabels || {})
+        setCustomerInteractions(data.customerInteractions || [])
+        
+        // Set default date selections
+        if (data.availableDates && data.availableDates.length > 0) {
+          const latest = data.availableDates[data.availableDates.length - 1]
+          setSelectedDay(latest)
+          setWeekStart(latest)
+        }
+      }
+    } catch (err) {
+      console.error('Error loading dashboard data:', err)
+      // Don't show error - just start with empty state
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   useEffect(() => {
     if (availableDates.length > 0) {
@@ -535,13 +578,41 @@ export default function Dashboard() {
     try {
       const buffer = await file.arrayBuffer()
       const parsed = parseWorkbook(buffer)
-      setRawMetrics(parsed.metrics)
-      setAvailableDates(parsed.availableDates)
-      setDateLabels(parsed.dateLabels)
-      setCustomerInteractions(parsed.customerInteractions)
-      setTimeframe('all')
-      setSelectedDay(parsed.availableDates[parsed.availableDates.length - 1] ?? '')
-      setWeekStart(parsed.availableDates[parsed.availableDates.length - 1] ?? '')
+      
+      setIsParsing(false) // Stop parsing indicator
+      
+      // Save to database first, then reload merged data
+      try {
+        const saveResponse = await fetch('/api/excel/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(parsed),
+        })
+        
+        if (!saveResponse.ok) {
+          const errorData = await saveResponse.json()
+          console.error('Error saving to database:', errorData.error || 'Failed to save')
+          // Still update UI with parsed data even if save fails
+          setRawMetrics(parsed.metrics)
+          setAvailableDates(parsed.availableDates)
+          setDateLabels(parsed.dateLabels)
+          setCustomerInteractions(parsed.customerInteractions)
+          setSelectedDay(parsed.availableDates[parsed.availableDates.length - 1] ?? '')
+          setWeekStart(parsed.availableDates[parsed.availableDates.length - 1] ?? '')
+        } else {
+          // Reload data from database to get merged/updated data
+          await loadDashboardData()
+        }
+      } catch (saveError) {
+        console.error('Error saving to database:', saveError)
+        // Still update UI with parsed data even if save fails
+        setRawMetrics(parsed.metrics)
+        setAvailableDates(parsed.availableDates)
+        setDateLabels(parsed.dateLabels)
+        setCustomerInteractions(parsed.customerInteractions)
+        setSelectedDay(parsed.availableDates[parsed.availableDates.length - 1] ?? '')
+        setWeekStart(parsed.availableDates[parsed.availableDates.length - 1] ?? '')
+      }
     } catch (err) {
       console.error(err)
       setRawMetrics([])
@@ -549,7 +620,6 @@ export default function Dashboard() {
       setDateLabels({})
       setCustomerInteractions([])
       setError(err instanceof Error ? err.message : 'Failed to parse Excel file.')
-    } finally {
       setIsParsing(false)
     }
   }
@@ -605,19 +675,19 @@ export default function Dashboard() {
   }, [dateLabels, selectedSalesperson])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
-      <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex">
+      <Sidebar />
+      <div className="flex-1 flex flex-col">
+        <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
+          <div className="px-6 py-4">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Excel Report Dashboard</h1>
-            <p className="text-sm text-gray-600 dark:text-gray-300">
+            <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
               Upload the consolidated Excel file to analyse incentives per salesperson.
             </p>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <main className="flex-1 px-6 py-8">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 border border-gray-200 dark:border-gray-700">
             <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Incentive</p>
@@ -665,9 +735,12 @@ export default function Dashboard() {
               {fileName && (
                 <p className="text-sm text-gray-600 dark:text-gray-400">Uploaded file: {fileName}</p>
               )}
+              {isLoading && !isParsing && (
+                <p className="text-sm text-blue-600 dark:text-blue-400">Loading data from database…</p>
+              )}
               {isParsing && <p className="text-sm text-blue-600 dark:text-blue-400">Parsing workbook…</p>}
               {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-              {!isParsing && rawMetrics.length === 0 && !error && (
+              {!isLoading && !isParsing && rawMetrics.length === 0 && !error && (
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   No incentive data loaded yet. Upload the Excel workbook to see results.
                 </p>
@@ -939,7 +1012,8 @@ export default function Dashboard() {
             </table>
           </div>
         </div>
-      </main>
+        </main>
+      </div>
     </div>
   )
 }
