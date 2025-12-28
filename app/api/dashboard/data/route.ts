@@ -54,6 +54,12 @@ export async function GET(request: NextRequest) {
     const customerInteractions: any[] = []
 
     for (const visit of visits) {
+      // Defensive check for required fields
+      if (!visit.visitDate || !visit.customer || !visit.salespersons) {
+        console.warn('Skipping visit with missing required fields:', visit.id)
+        continue
+      }
+
       const visitDate = visit.visitDate.toISOString().split('T')[0]
       availableDates.add(visitDate)
       dateLabels[visitDate] = visit.visitDate.toLocaleDateString('en-GB', {
@@ -63,7 +69,13 @@ export async function GET(request: NextRequest) {
       })
 
       // Process each salesperson in this visit
+      if (!Array.isArray(visit.salespersons)) {
+        console.warn('Visit has invalid salespersons array:', visit.id)
+        continue
+      }
+
       for (const salespersonName of visit.salespersons) {
+        if (!salespersonName) continue // Skip empty salesperson names
         if (!salespersonMap.has(salespersonName)) {
           salespersonMap.set(salespersonName, {
             name: salespersonName,
@@ -79,30 +91,34 @@ export async function GET(request: NextRequest) {
 
         // Add breakdown entry
         metric.breakdown.push({
-          customerId: visit.customer.customerId,
-          amount: Number(visit.incentiveAmount),
-          departmentsVisited: visit.departmentsCount,
-          visitedDepartments: visit.departmentsVisited,
-          handledDepartments: visit.departmentsVisited, // Simplified - could be enhanced
+          customerId: visit.customer.customerId || '',
+          amount: Number(visit.incentiveAmount) || 0,
+          departmentsVisited: visit.departmentsCount || 0,
+          visitedDepartments: Array.isArray(visit.departmentsVisited) ? visit.departmentsVisited : [],
+          handledDepartments: Array.isArray(visit.departmentsVisited) ? visit.departmentsVisited : [],
           dateKey: visitDate,
           dateIso: visitDate,
-          displayDate: dateLabels[visitDate],
+          displayDate: dateLabels[visitDate] || visitDate,
         })
 
         // Add customer interactions from transactions
-        visit.transactions.forEach(transaction => {
-          customerInteractions.push({
-            customerId: visit.customer.customerId,
-            normalizedCustomerId: visit.customer.normalizedCustomerId,
-            voucherNo: transaction.voucherNo,
-            voucherDateIso: visitDate,
-            voucherDateDisplay: dateLabels[visitDate],
-            department: transaction.department || null,
-            counter: transaction.counter || null,
-            departmentLabel: transaction.departmentLabel || null,
-            salesperson: transaction.salesperson || salespersonName,
+        if (visit.transactions && Array.isArray(visit.transactions)) {
+          visit.transactions.forEach(transaction => {
+            if (!transaction) return // Skip null transactions
+            
+            customerInteractions.push({
+              customerId: visit.customer.customerId || '',
+              normalizedCustomerId: visit.customer.normalizedCustomerId || '',
+              voucherNo: transaction.voucherNo || '',
+              voucherDateIso: visitDate,
+              voucherDateDisplay: dateLabels[visitDate],
+              department: transaction.department || null,
+              counter: transaction.counter || null,
+              departmentLabel: transaction.departmentLabel || null,
+              salesperson: transaction.salesperson || salespersonName,
+            })
           })
-        })
+        }
       }
     }
 
