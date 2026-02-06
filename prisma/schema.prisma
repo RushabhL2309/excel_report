@@ -34,11 +34,11 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  initiatedCalls    Call[]                @relation("CallInitiator")
+  initiatedCalls    Call[]              @relation("CallInitiator")
   callFeedbacks     CallFeedback[]
   crossSellAttempts CrossSellingAttempt[]
-  remindersCreated  FollowUpReminder[]    @relation("ReminderCreator")
-  remindersAssigned FollowUpReminder[]    @relation("ReminderAssignee")
+  remindersCreated  FollowUpReminder    @relation("ReminderCreator")
+  remindersAssigned FollowUpReminder    @relation("ReminderAssignee")
 
   @@map("users")
 }
@@ -51,24 +51,24 @@ enum UserRole {
 
 // Customers
 model Customer {
-  id                   String    @id @default(auto()) @map("_id") @db.ObjectId
-  customerId           String // Mobile1 from Excel
-  normalizedCustomerId String    @map("normalized_customer_id")
-  phone                String?
-  visitCount           Int       @default(0) @map("visit_count")
-  firstVisitDate       DateTime? @map("first_visit_date")
-  lastVisitDate        DateTime? @map("last_visit_date")
-  totalIncentiveAmount Float     @default(0) @map("total_incentive_amount")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  updatedAt            DateTime  @updatedAt @map("updated_at")
+  id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+  customerId            String   // Mobile1 from Excel
+  normalizedCustomerId  String   @map("normalized_customer_id")
+  phone                 String?
+  visitCount            Int      @default(0) @map("visit_count")
+  firstVisitDate        DateTime? @map("first_visit_date")
+  lastVisitDate         DateTime? @map("last_visit_date")
+  totalIncentiveAmount  Float    @default(0) @map("total_incentive_amount")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
 
-  visits            CustomerVisit[]
-  transactions      VisitTransaction[]
-  calls             Call[]
-  feedbacks         CallFeedback[]        @relation("CustomerCallFeedback")
-  crossSellAttempts CrossSellingAttempt[]
-  reminders         FollowUpReminder[]
-  analytics         CustomerAnalytics?
+  visits              CustomerVisit[]
+  transactions        VisitTransaction[]
+  calls               Call[]
+  feedbacks           CallFeedback[]
+  crossSellAttempts   CrossSellingAttempt[]
+  reminders           FollowUpReminder[]
+  analytics           CustomerAnalytics?
 
   @@unique([normalizedCustomerId])
   @@map("customers")
@@ -89,11 +89,9 @@ model CustomerVisit {
   salespersons              String[] // Array of salesperson names
   createdAt                 DateTime @default(now()) @map("created_at")
 
-  customer          Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  transactions      VisitTransaction[]
+  customer      Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  transactions  VisitTransaction[]
   crossSellAttempts CrossSellingAttempt[]
-  calls             Call[]
-  callFeedbacks     CallFeedback[]
 
   @@index([customerId])
   @@index([visitDate])
@@ -102,16 +100,16 @@ model CustomerVisit {
 
 // Visit Transactions (Individual orders/interactions)
 model VisitTransaction {
-  id              String   @id @default(auto()) @map("_id") @db.ObjectId
-  visitId         String   @map("visit_id") @db.ObjectId
-  customerId      String   @map("customer_id") @db.ObjectId
-  voucherNo       String   @map("voucher_no")
-  voucherDate     DateTime @map("voucher_date")
-  department      String
-  counter         String?
-  departmentLabel String   @map("department_label")
-  salesperson     String
-  createdAt       DateTime @default(now()) @map("created_at")
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  visitId        String   @map("visit_id") @db.ObjectId
+  customerId     String   @map("customer_id") @db.ObjectId
+  voucherNo      String   @map("voucher_no")
+  voucherDate    DateTime @map("voucher_date")
+  department     String
+  counter        String?
+  departmentLabel String  @map("department_label")
+  salesperson    String
+  createdAt      DateTime @default(now()) @map("created_at")
 
   visit    CustomerVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
   customer Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -123,30 +121,27 @@ model VisitTransaction {
 
 // Calls
 model Call {
-  id             String             @id @default(auto()) @map("_id") @db.ObjectId
-  customerId     String             @map("customer_id") @db.ObjectId
-  visitId        String?            @map("visit_id") @db.ObjectId // Link to specific visit
-  initiatedBy    String             @map("initiated_by") @db.ObjectId
-  callType       CallType           @default(OUTBOUND) @map("call_type")
-  providerCallId String?            @map("provider_call_id")
+  id             String      @id @default(auto()) @map("_id") @db.ObjectId
+  customerId     String      @map("customer_id") @db.ObjectId
+  initiatedBy    String      @map("initiated_by") @db.ObjectId
+  callType       CallType    @default(OUTBOUND) @map("call_type")
+  providerCallId String?     @map("provider_call_id")
   provider       TelephonyProvider?
-  status         CallStatus         @default(INITIATED)
-  duration       Int? // Seconds
-  startedAt      DateTime           @map("started_at")
-  endedAt        DateTime?          @map("ended_at")
-  recordingUrl   String?            @map("recording_url")
-  bridgeStatus   BridgeStatus?      @map("bridge_status")
-  createdAt      DateTime           @default(now()) @map("created_at")
-  updatedAt      DateTime           @updatedAt @map("updated_at")
+  status         CallStatus  @default(INITIATED)
+  duration       Int?        // Seconds
+  startedAt      DateTime    @map("started_at")
+  endedAt        DateTime?   @map("ended_at")
+  recordingUrl   String?     @map("recording_url")
+  bridgeStatus   BridgeStatus? @map("bridge_status")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
 
-  customer        Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  visit           CustomerVisit? @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  initiatedByUser User           @relation("CallInitiator", fields: [initiatedBy], references: [id])
+  customer        Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  initiatedByUser User          @relation("CallInitiator", fields: [initiatedBy], references: [id])
   feedback        CallFeedback?
   auditLogs       CallAuditLog[]
 
   @@index([customerId])
-  @@index([visitId])
   @@index([initiatedBy])
   @@index([status])
   @@map("calls")
@@ -181,29 +176,26 @@ enum TelephonyProvider {
 
 // Call Feedback
 model CallFeedback {
-  id                             String       @id @default(auto()) @map("_id") @db.ObjectId
-  callId                         String       @unique @map("call_id") @db.ObjectId
-  customerId                     String       @map("customer_id") @db.ObjectId
-  visitId                        String?      @map("visit_id") @db.ObjectId // Link to specific visit
-  submittedBy                    String       @map("submitted_by") @db.ObjectId
-  outcome                        CallOutcome
-  customerMood                   CustomerMood
-  rating                         Int? // 1-5
-  notes                          String?
-  requiresFollowUp               Boolean      @default(false) @map("requires_follow_up")
-  followUpDate                   DateTime?    @map("follow_up_date")
-  followUpReason                 String?      @map("follow_up_reason")
-  nonVisitedDepartmentsDiscussed String[]     @map("non_visited_departments_discussed")
-  nonVisitedReasons              Json?        @map("non_visited_reasons") // Array of NonVisitReason objects
-  createdAt                      DateTime     @default(now()) @map("created_at")
+  id                          String   @id @default(auto()) @map("_id") @db.ObjectId
+  callId                      String   @unique @map("call_id") @db.ObjectId
+  customerId                  String   @map("customer_id") @db.ObjectId
+  submittedBy                 String   @map("submitted_by") @db.ObjectId
+  outcome                     CallOutcome
+  customerMood                CustomerMood
+  rating                      Int?     // 1-5
+  notes                       String?
+  requiresFollowUp            Boolean  @default(false) @map("requires_follow_up")
+  followUpDate                DateTime? @map("follow_up_date")
+  followUpReason              String?  @map("follow_up_reason")
+  nonVisitedDepartmentsDiscussed String[] @map("non_visited_departments_discussed")
+  nonVisitedReasons           Json?    @map("non_visited_reasons") // Array of NonVisitReason objects
+  createdAt                   DateTime @default(now()) @map("created_at")
 
-  call            Call           @relation(fields: [callId], references: [id], onDelete: Cascade)
-  customer        Customer       @relation("CustomerCallFeedback", fields: [customerId], references: [id], onDelete: Cascade)
-  visit           CustomerVisit? @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  submittedByUser User           @relation(fields: [submittedBy], references: [id])
+  call        Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  submittedByUser User @relation(fields: [submittedBy], references: [id])
 
   @@index([customerId])
-  @@index([visitId])
   @@map("call_feedback")
 }
 
@@ -225,20 +217,20 @@ enum CustomerMood {
 
 // Cross-Selling Attempt Tracking
 model CrossSellingAttempt {
-  id                   String      @id @default(auto()) @map("_id") @db.ObjectId
-  visitId              String      @map("visit_id") @db.ObjectId
-  customerId           String      @map("customer_id") @db.ObjectId
-  salespersonId        String      @map("salesperson_id") @db.ObjectId
-  salespersonName      String      @map("salesperson_name")
-  customerDepartment   String      @map("customer_department")
-  suggestedDepartments String[]    @map("suggested_departments")
-  attemptDate          DateTime    @map("attempt_date")
-  attemptType          AttemptType @map("attempt_type")
-  createdAt            DateTime    @default(now()) @map("created_at")
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  visitId           String   @map("visit_id") @db.ObjectId
+  customerId        String   @map("customer_id") @db.ObjectId
+  salespersonId     String   @map("salesperson_id") @db.ObjectId
+  salespersonName   String   @map("salesperson_name")
+  customerDepartment String  @map("customer_department")
+  suggestedDepartments String[] @map("suggested_departments")
+  attemptDate       DateTime @map("attempt_date")
+  attemptType       AttemptType @map("attempt_type")
+  createdAt         DateTime @default(now()) @map("created_at")
 
-  visit       CustomerVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  customer    Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  salesperson User          @relation(fields: [salespersonId], references: [id])
+  visit      CustomerVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  customer   Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  salesperson User         @relation(fields: [salespersonId], references: [id])
 
   @@index([visitId])
   @@index([customerId])
@@ -255,20 +247,20 @@ enum AttemptType {
 
 // Follow-up Reminders
 model FollowUpReminder {
-  id           String         @id @default(auto()) @map("_id") @db.ObjectId
-  customerId   String         @map("customer_id") @db.ObjectId
-  callId       String?        @map("call_id") @db.ObjectId
-  createdBy    String         @map("created_by") @db.ObjectId
-  assignedTo   String         @map("assigned_to") @db.ObjectId
-  reminderDate DateTime       @map("reminder_date")
-  status       ReminderStatus @default(PENDING)
-  notes        String?
-  createdAt    DateTime       @default(now()) @map("created_at")
-  completedAt  DateTime?      @map("completed_at")
+  id          String            @id @default(auto()) @map("_id") @db.ObjectId
+  customerId  String            @map("customer_id") @db.ObjectId
+  callId      String?           @map("call_id") @db.ObjectId
+  createdBy   String            @map("created_by") @db.ObjectId
+  assignedTo  String            @map("assigned_to") @db.ObjectId
+  reminderDate DateTime         @map("reminder_date")
+  status      ReminderStatus    @default(PENDING)
+  notes       String?
+  createdAt   DateTime          @default(now()) @map("created_at")
+  completedAt DateTime?         @map("completed_at")
 
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  creator  User     @relation("ReminderCreator", fields: [createdBy], references: [id])
-  assignee User     @relation("ReminderAssignee", fields: [assignedTo], references: [id])
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  creator     User     @relation("ReminderCreator", fields: [createdBy], references: [id])
+  assignee    User     @relation("ReminderAssignee", fields: [assignedTo], references: [id])
 
   @@index([customerId])
   @@index([assignedTo])
@@ -289,7 +281,7 @@ model CallAuditLog {
   callId      String   @map("call_id") @db.ObjectId
   action      String
   performedBy String   @map("performed_by")
-  details     Json? // Additional context
+  details     Json?    // Additional context
   timestamp   DateTime @default(now())
 
   call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
@@ -300,18 +292,18 @@ model CallAuditLog {
 
 // Customer Interaction Analytics (Pre-computed for performance)
 model CustomerAnalytics {
-  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
-  customerId            String    @unique @map("customer_id") @db.ObjectId
-  totalVisits           Int       @default(0) @map("total_visits")
-  totalCalls            Int       @default(0) @map("total_calls")
-  totalFeedback         Int       @default(0) @map("total_feedback")
-  averageRating         Float?    @map("average_rating")
-  lastCallDate          DateTime? @map("last_call_date")
-  lastVisitDate         DateTime? @map("last_visit_date")
-  preferredDepartments  String[]  @map("preferred_departments")
-  preferredSalespersons String[]  @map("preferred_salespersons")
-  repeatCustomer        Boolean   @default(false) @map("repeat_customer")
-  updatedAt             DateTime  @updatedAt @map("updated_at")
+  id                  String   @id @default(auto()) @map("_id") @db.ObjectId
+  customerId          String   @unique @map("customer_id") @db.ObjectId
+  totalVisits         Int      @default(0) @map("total_visits")
+  totalCalls          Int      @default(0) @map("total_calls")
+  totalFeedback       Int      @default(0) @map("total_feedback")
+  averageRating       Float?   @map("average_rating")
+  lastCallDate        DateTime? @map("last_call_date")
+  lastVisitDate       DateTime? @map("last_visit_date")
+  preferredDepartments String[] @map("preferred_departments")
+  preferredSalespersons String[] @map("preferred_salespersons")
+  repeatCustomer      Boolean  @default(false) @map("repeat_customer")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 

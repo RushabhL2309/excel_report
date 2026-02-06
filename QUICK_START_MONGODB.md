@@ -1,37 +1,61 @@
 # Quick Start: MongoDB Setup
 
-## Step 1: Create `.env` File
+## Step 1: Add MongoDB Connection URL
 
-Create a file named `.env` in the root directory (same folder as `package.json`)
+**Create a file named `.env` in the root directory** (same folder as `package.json`)
 
-## Step 2: Add MongoDB URL
-
-Add this single line to your `.env` file:
+Add this line:
 
 ```env
 DATABASE_URL="mongodb://localhost:27017/excel_report"
 ```
-
-**That's the format you need!**
 
 ### For MongoDB Atlas (Cloud):
 ```env
 DATABASE_URL="mongodb+srv://username:password@cluster.mongodb.net/excel_report?retryWrites=true&w=majority"
 ```
 
-Replace `username`, `password`, and `cluster.mongodb.net` with your actual values.
+**Replace:**
+- `username` - Your MongoDB username
+- `password` - Your MongoDB password  
+- `cluster.mongodb.net` - Your Atlas cluster URL
+- `excel_report` - Database name (change if needed)
 
-## Step 3: Setup Database
+## Step 2: Setup Database
+
+Run these commands:
 
 ```bash
+# Generate Prisma client for MongoDB
 npx prisma generate
+
+# Push schema to MongoDB (creates collections)
 npx prisma db push
 ```
 
-## Step 4: Run the App
+## Step 3: Test It
 
 ```bash
+# Start the app
 npm run dev
+
+# Upload an Excel file
+# Data will be saved to MongoDB automatically
 ```
 
-Upload an Excel file and data will be saved to MongoDB automatically!
+## Step 4: View Data (Optional)
+
+```bash
+# Open Prisma Studio to view your data
+npx prisma studio
+```
+
+This opens a web interface at http://localhost:5555 where you can browse your MongoDB collections.
+
+## That's It! ✅
+
+Your data is now being saved to MongoDB when you upload Excel files.
+
+
+
+

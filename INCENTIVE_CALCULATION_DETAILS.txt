@@ -1,0 +1,348 @@
+================================================================================
+DETAILED INCENTIVE CALCULATION METHODOLOGY
+================================================================================
+
+This document explains step-by-step how salesperson incentives are calculated
+from the Excel workbook data.
+
+================================================================================
+1. EXCEL FILE STRUCTURE & DATA EXTRACTION
+================================================================================
+
+The system reads an Excel file (.xlsx or .xls) and expects the following columns:
+
+Required Columns:
+- "Salesman Name" or "Sales Person" - Name of the salesperson
+- "ItemGroup Name" or "Item Group Name" or "Item Group" - Department name
+- "Mobile1" or "Customer ID" or "Customer Mobile" - Customer identifier
+
+Optional Columns:
+- "Voucher No" - Voucher number for the transaction
+- "Voucher Date" or "Date" - Date of the transaction
+- "Counter Name" or "Counter" - Counter name
+
+Header Row Detection:
+- System looks for header row at row 4 (index 3)
+- If not found, searches for first non-empty row
+
+================================================================================
+2. DATA PARSING & NORMALIZATION
+================================================================================
+
+For each row in the Excel file (after header row):
+
+Step 2.1: Extract Raw Values
+----------------------------
+- rawSalesman = Value from "Salesman Name" column
+- rawDepartment = Value from "ItemGroup Name" column
+- rawCounter = Value from "Counter Name" column (if available)
+- rawCustomerId = Value from "Mobile1" column
+- voucherNo = Value from "Voucher No" column (if available)
+- voucherDate = Value from "Voucher Date" column (if available)
+
+Step 2.2: Normalize Values
+---------------------------
+- salesmanKey = Normalized salesperson name (lowercase, trimmed, spaces collapsed)
+- customerKey = Normalized customer ID (lowercase, trimmed, spaces collapsed)
+- dateKey = Normalized date (ISO format YYYY-MM-DD if valid, else normalized text)
+- departmentLabel = Format: "Department (Counter)" or just "Department" or just "Counter"
+
+Special Department Normalization:
+- "mens accessories" or "men's accessories" → converted to "MENS ETHNICS"
+
+Step 2.3: Build Data Structures
+--------------------------------
+The system builds three main maps during parsing:
+
+A) salesmanDepartments Map
+   Key: Normalized salesperson key
+   Value: {
+     name: Original salesperson name,
+     departments: Set of all department labels this salesperson handles
+   }
+
+B) customerVisits Map
+   Key: "customerKey__dateKey" (e.g., "1234567890__2024-01-15")
+   Value: {
+     customerId: Original customer ID,
+     departments: Set of all departments visited by this customer on this date,
+     dateIso: ISO date string (YYYY-MM-DD) or null,
+     dateKey: Normalized date key
+   }
+
+C) customerSalesmen Map
+   Key: "customerKey__dateKey"
+   Value: Map of salesperson keys to their department sets for this customer visit
+   Nested structure:
+     - Key: Normalized salesperson key
+     - Value: {
+         name: Original salesperson name,
+         departments: Set of departments handled by this salesperson for this customer
+       }
+
+================================================================================
+3. INCENTIVE CALCULATION LOGIC
+================================================================================
+
+For each customer visit (unique combination of customer + date):
+
+Step 3.1: Identify Customer Visit
+----------------------------------
+- visitKey = "customerKey__dateKey"
+- visitInfo = customerVisits.get(visitKey)
+- salesmenForVisit = customerSalesmen.get(visitKey)
+
+If no salesmen found for this visit, skip (no incentive).
+
+Step 3.2: Count Unique Departments Visited
+-------------------------------------------
+Start with departments from customerVisits:
+  uniqueVisitedDepartments = Set(visitInfo.departments)
+
+Add all departments handled by any salesperson for this visit:
+  For each salesperson in salesmenForVisit:
+    For each department in salesperson.departments:
+      uniqueVisitedDepartments.add(department)
+
+Result: uniqueVisitedDepartments contains ALL unique departments
+        visited/handled during this customer visit
+
+Step 3.3: Calculate Department Count
+-------------------------------------
+departmentsVisitedCount = uniqueVisitedDepartments.size
+
+Example:
+- Customer visited: ["MENS ETHNICS", "WOMENS WEAR", "FOOTWEAR"]
+- Salesperson A handled: ["MENS ETHNICS", "KIDS WEAR"]
+- Salesperson B handled: ["FOOTWEAR"]
+- Result: departmentsVisitedCount = 4
+  (MENS ETHNICS, WOMENS WEAR, FOOTWEAR, KIDS WEAR)
+
+Step 3.4: Calculate Incentive Amount
+-------------------------------------
+Apply incentive tier based on department count:
+
+Incentive Tier Table:
++-------------------+------------------+
+| Departments Count | Incentive Amount |
++-------------------+------------------+
+| 5 or more         | ₹80              |
+| 4                 | ₹60              |
+| 3                 | ₹40              |
+| 2                 | ₹20              |
+| 1 or 0            | ₹0 (no incentive)|
++-------------------+------------------+
+
+Formula:
+  if (departmentsVisitedCount >= 5) → incentiveAmount = 80
+  else if (departmentsVisitedCount === 4) → incentiveAmount = 60
+  else if (departmentsVisitedCount === 3) → incentiveAmount = 40
+  else if (departmentsVisitedCount === 2) → incentiveAmount = 20
+  else → incentiveAmount = 0
+
+If incentiveAmount === 0, skip this visit (no incentive record created).
+
+Step 3.5: Distribute Incentive to Salespersons
+------------------------------------------------
+For each salesperson who handled this customer visit:
+
+Create an incentive breakdown entry:
+{
+  customerId: Original customer ID,
+  amount: incentiveAmount (same amount for all salespersons for this visit),
+  departmentsVisited: departmentsVisitedCount,
+  visitedDepartments: Array of all unique departments (from uniqueVisitedDepartments),
+  handledDepartments: Array of departments handled by this specific salesperson,
+  dateKey: visitInfo.dateKey,
+  dateIso: visitInfo.dateIso,
+  displayDate: Formatted date string (e.g., "15 Jan 2024")
+}
+
+Important: ALL salespersons who handled the customer get the FULL incentive amount.
+The incentive is NOT split/divided between salespersons.
+
+Example:
+- Customer visited 4 departments
+- Salesperson A handled 2 departments
+- Salesperson B handled 1 department
+- Incentive = ₹60 (for 4 departments)
+- Salesperson A gets ₹60
+- Salesperson B gets ₹60
+- Total incentive paid = ₹120 (₹60 + ₹60)
+
+================================================================================
+4. SALESPERSON METRIC AGGREGATION
+================================================================================
+
+Step 4.1: Group by Salesperson
+-------------------------------
+For each salesperson key in breakdownMap:
+
+- name = Original salesperson name
+- breakdown = Array of all incentive entries for this salesperson
+- departments = All departments this salesperson handles (from salesmanDepartments)
+
+Step 4.2: Sort Breakdown Entries
+---------------------------------
+Sort breakdown entries by:
+1. Date (newest first) if date is available
+2. Amount (highest first) if dates are same or unavailable
+
+Step 4.3: Calculate Total Incentive
+------------------------------------
+totalIncentive = Sum of all amount values in breakdown array
+
+Formula:
+  totalIncentive = breakdown[0].amount + breakdown[1].amount + ... + breakdown[n].amount
+
+Step 4.4: Create Final Metrics
+-------------------------------
+For each salesperson:
+{
+  name: Salesperson name,
+  departments: Array of all departments handled,
+  totalIncentive: Sum of all incentive amounts,
+  breakdown: Sorted array of incentive entries
+}
+
+Step 4.5: Include Salespersons with Zero Incentives
+----------------------------------------------------
+If a salesperson exists in salesmanDepartments but has no incentive entries:
+- Add to metrics with totalIncentive = 0 and breakdown = []
+
+Step 4.6: Sort Final Metrics
+-----------------------------
+Sort salespersons by:
+1. totalIncentive (highest first)
+2. name (alphabetical) if totals are equal
+
+================================================================================
+5. TIMELINE FILTERING
+================================================================================
+
+The system supports three timeline filters:
+
+A) All Time (timeframe = "all")
+   - Shows all incentive entries regardless of date
+   - filterPredicate: Always returns true
+
+B) Specific Day (timeframe = "day")
+   - Shows only entries matching selectedDay
+   - filterPredicate: entry.dateIso === selectedDay
+
+C) Specific Week (timeframe = "week")
+   - Shows entries from weekStart to weekStart + 6 days
+   - filterPredicate: entry.dateIso is within the 7-day range
+
+Filtering happens at display time:
+- filteredBreakdown = breakdown.filter(filterPredicate)
+- filteredTotal = Sum of filteredBreakdown amounts
+- customersCount = Unique customer IDs in filteredBreakdown
+
+================================================================================
+6. EXAMPLE CALCULATION SCENARIO
+================================================================================
+
+Excel Data:
+-----------
+Row 1: Salesman Name: "John Doe", ItemGroup: "MENS ETHNICS", Mobile1: "9876543210", Date: "2024-01-15"
+Row 2: Salesman Name: "John Doe", ItemGroup: "KIDS WEAR", Mobile1: "9876543210", Date: "2024-01-15"
+Row 3: Salesman Name: "Jane Smith", ItemGroup: "WOMENS WEAR", Mobile1: "9876543210", Date: "2024-01-15"
+Row 4: Salesman Name: "John Doe", ItemGroup: "FOOTWEAR", Mobile1: "9876543210", Date: "2024-01-15"
+
+Step-by-Step Calculation:
+-------------------------
+
+1. Parsing:
+   - customerKey = "9876543210"
+   - dateKey = "2024-01-15"
+   - visitKey = "9876543210__2024-01-15"
+
+2. Building Maps:
+   customerVisits["9876543210__2024-01-15"] = {
+     customerId: "9876543210",
+     departments: Set(["MENS ETHNICS", "KIDS WEAR", "WOMENS WEAR", "FOOTWEAR"]),
+     dateIso: "2024-01-15"
+   }
+
+   customerSalesmen["9876543210__2024-01-15"] = {
+     "john doe": {
+       name: "John Doe",
+       departments: Set(["MENS ETHNICS", "KIDS WEAR", "FOOTWEAR"])
+     },
+     "jane smith": {
+       name: "Jane Smith",
+       departments: Set(["WOMENS WEAR"])
+     }
+   }
+
+3. Calculate Unique Departments:
+   uniqueVisitedDepartments = Set(["MENS ETHNICS", "KIDS WEAR", "WOMENS WEAR", "FOOTWEAR"])
+   departmentsVisitedCount = 4
+
+4. Calculate Incentive:
+   departmentsVisitedCount = 4 → incentiveAmount = ₹60
+
+5. Create Breakdown Entries:
+
+   For John Doe:
+   {
+     customerId: "9876543210",
+     amount: 60,
+     departmentsVisited: 4,
+     visitedDepartments: ["MENS ETHNICS", "KIDS WEAR", "WOMENS WEAR", "FOOTWEAR"],
+     handledDepartments: ["MENS ETHNICS", "KIDS WEAR", "FOOTWEAR"],
+     dateIso: "2024-01-15",
+     displayDate: "15 Jan 2024"
+   }
+
+   For Jane Smith:
+   {
+     customerId: "9876543210",
+     amount: 60,
+     departmentsVisited: 4,
+     visitedDepartments: ["MENS ETHNICS", "KIDS WEAR", "WOMENS WEAR", "FOOTWEAR"],
+     handledDepartments: ["WOMENS WEAR"],
+     dateIso: "2024-01-15",
+     displayDate: "15 Jan 2024"
+   }
+
+6. Final Totals:
+   John Doe:
+     - totalIncentive = ₹60
+     - breakdown entries = 1
+   
+   Jane Smith:
+     - totalIncentive = ₹60
+     - breakdown entries = 1
+
+================================================================================
+7. KEY POINTS TO REMEMBER
+================================================================================
+
+1. Incentive is based on TOTAL unique departments visited by customer on a date,
+   NOT just departments handled by individual salesperson.
+
+2. ALL salespersons who handled the customer get the FULL incentive amount.
+   The incentive is NOT divided or split.
+
+3. Incentive is only calculated if customer visits 2 or more departments.
+
+4. Multiple salespersons can get incentive for the same customer visit.
+
+5. Date grouping: All transactions on the same date for the same customer
+   are considered ONE visit.
+
+6. Department count includes both:
+   - Departments from customer visits (customerVisits map)
+   - Departments handled by salespersons (customerSalesmen map)
+
+7. The same salesperson can get multiple incentives if they handle
+   different customers or same customer on different dates.
+
+================================================================================
+END OF DOCUMENT
+================================================================================
+
+
+
