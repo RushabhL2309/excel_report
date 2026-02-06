@@ -44,7 +44,7 @@ export default function Sidebar() {
 
   // Filter nav items based on user role
   const navItems = user
-    ? allNavItems.filter((item) => item.roles.includes(user.role))
+    ? allNavItems.filter((item) => item.roles.includes(user.role as 'ADMIN' | 'TELECALLER'))
     : []
 
   const roleDisplayName = user?.role === 'ADMIN' ? 'Admin' : 'Telecaller'
@@ -72,11 +72,10 @@ export default function Sidebar() {
               <li key={item.href}>
                 <Link
                   href={item.href}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                    isActive
+                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${isActive
                       ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 font-medium'
                       : 'text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-                  }`}
+                    }`}
                 >
                   {item.icon}
                   <span>{item.name}</span>
